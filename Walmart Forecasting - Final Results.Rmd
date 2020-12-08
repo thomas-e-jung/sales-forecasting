@@ -23,6 +23,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # install.packages("prophet")
 # install.packages("data.table")
 # install.packages("nortest")
+# install.packages("dprep")
 
 
 library(corrgram)
@@ -39,6 +40,7 @@ library(moments)
 library(prophet)
 library(data.table)
 library(nortest)
+library(dprep)
 ```
 
 
@@ -153,7 +155,7 @@ Multiple Regression
 ```{r}
 # Remove Datetime
 df_reg <- df %>%
-  select(-Date)
+  dplyr::select(-Date)
 
 # Check for skewness
 skewness(df_reg$Weekly_Sales)
@@ -163,20 +165,8 @@ skewness(df_reg$Weekly_Sales)
 ad.test(df_reg$Weekly_Sales)
 # p-value <2e-16; non-normal distribution
 
-# Normalize data
-min_value <- min(df_reg$Weekly_Sales)
-max_value <- max(df_reg$Weekly_Sales)
-#min_max <- matrix(c(min(df_reg$Weekly_Sales), max(df_reg$Weekly_Sales)), nrow = 421570, ncol = 2, byrow = TRUE)
-df_reg <- df_reg %>%
-  mutate(Weekly_Sales_Norm = (Weekly_Sales-min_value)/(max_value-min_value)) %>%
-  dplyr::select(-Weekly_Sales)
-
-# Check for normality
-ad.test(df_reg$Weekly_Sales_Norm)
-# p-value <2e-16; non-normal distribution
-
 # Check for non-constant variance (heteroskedasticity) & non-normality
-model_1 <- lm(Weekly_Sales_Norm ~ ., data = df_reg)
+model_1 <- lm(Weekly_Sales ~ ., data = df_reg)
 summary(model_1)
 # R2 = 0.658,
 # p-value < 2e-16
@@ -186,9 +176,9 @@ plot(model_1)
 
 # Check for correlations between independent variables
 X <- df_reg %>%
-  dplyr::select(-Weekly_Sales_Norm)
+  dplyr::select(-Weekly_Sales)
 Y <- df_reg %>%
-  dplyr::select(Weekly_Sales_Norm)
+  dplyr::select(Weekly_Sales)
 corrgram(X, order=TRUE, lower.panel=panel.shade,
          upper.panel=panel.pie, text.panel=panel.txt,
          )
@@ -202,14 +192,14 @@ corrgram(X, order=TRUE, lower.panel=panel.shade,
 vif(model_1)
 # Check variables that are linearly dependent
 attributes(alias(model_1)$Complete)$dimnames[[1]]
-model_1 <- lm(Weekly_Sales_Norm ~ .-Type, data = df_reg)
+model_1 <- lm(Weekly_Sales ~ .-Type, data = df_reg)
 attributes(alias(model_1)$Complete)$dimnames[[1]]
-model_1 <- lm(Weekly_Sales_Norm ~ .-Type -Size, data = df_reg)
+model_1 <- lm(Weekly_Sales ~ .-Type -Size, data = df_reg)
 vif(model_1)
-model_1 <- lm(Weekly_Sales_Norm ~ .-Type -Size -CPI, data = df_reg)
+model_1 <- lm(Weekly_Sales ~ .-Type -Size -CPI, data = df_reg)
 vif(model_1)
 
-model_2 <- lm(Weekly_Sales_Norm ~ .-Type -Size -CPI, data = df_reg)
+model_2 <- lm(Weekly_Sales ~ .-Type -Size -CPI, data = df_reg)
 summary(model_2)
 # R2 = 0.658,
 # p-value < 2e-16
@@ -220,30 +210,49 @@ df_reg <- df_reg %>%
 
 
 
-# Train & Test sets (train on first 24 months, reserve last 8 months for testing)
+# Train & Test sets (train on first 24 months, reserve last 9 months for testing)
 rn_train <- as.numeric(rownames(df[df$Date < as.Date("2012-02-04"),]))
 train_set <- df_reg[rn_train,]
 test_set <- df_reg[-rn_train,]
 
+# Normalize data (z-normalization)
+Weekly_Sales_sd <- sd(train_set$Weekly_Sales)
+Weekly_Sales_mean <- mean(train_set$Weekly_Sales)
+train_set <- train_set %>%
+  mutate(Weekly_Sales_Norm = (Weekly_Sales - Weekly_Sales_mean)/Weekly_Sales_sd) %>%
+  dplyr::select(-Weekly_Sales)
+test_set <- test_set %>%
+  mutate(Weekly_Sales_Norm = (Weekly_Sales - Weekly_Sales_mean)/Weekly_Sales_sd) %>%
+  dplyr::select(-Weekly_Sales)
+
+# Train model
 model <- lm(Weekly_Sales_Norm ~ ., data = train_set)
 summary(model)
 # R2: 0.644
+# p-value: <2e-16
 
 prediction <- predict(model, newdata = test_set)
 
+# Denormalize data
+output <- data.frame(prediction_norm = prediction, actual_norm = test_set$Weekly_Sales_Norm) %>%
+  mutate(prediction = (prediction_norm*Weekly_Sales_sd)+Weekly_Sales_mean, actual = (actual_norm*Weekly_Sales_sd)+Weekly_Sales_mean) %>%
+  dplyr::select(c("prediction", "actual"))
+
 
 # Errors
-errors <- prediction - test_set$Weekly_Sales_Norm
+errors <- output$prediction - output$actual
 hist(errors)
 
 # Root Mean Squared Error
-pred_rmse <- RMSE(prediction, test_set$Weekly_Sales_Norm)
+pred_rmse <- RMSE(output$prediction, output$actual)
 paste("RMSE:", pred_rmse)
+# RMSE: 12229.0139946726
 
 # Percentage of cases with less than 30% error
-rel_change <- 1 - ((test_set$Weekly_Sales_Norm - abs(errors)) / test_set$Weekly_Sales_Norm)
-pred30 <- table(rel_change<0.30)["TRUE"] / nrow(test_set)
+rel_change <- 1 - ((output$actual - abs(errors)) / output$actual)
+pred30 <- table(rel_change<0.30)["TRUE"] / nrow(output)
 paste("PRED(30):", pred30)
+# PRED(30): 0.307341201126
 ```
 
 XGBoost
@@ -252,7 +261,7 @@ head(df)
 
 # Isolate dependent variable from dataset
 salesInfo_salesRemoved <- df %>%
-  select(-c(Weekly_Sales, Date)) %>%
+  dplyr::select(-c(Weekly_Sales, Date)) %>%
   mutate_if(is.factor, as.character) %>%
   mutate_if(is.logical, as.numeric)
 
@@ -269,19 +278,11 @@ options(na.action = "na.pass")
 storeMatrix <- model.matrix(~Store - 1, df)
 deptMatrix <- model.matrix(~Dept - 1, df)
 # leave date features (week_number) as numeric
-# weekNumMatrix <- model.matrix(~week_number - 1, df)
 typeMatrix <- model.matrix(~Type - 1, df)
 salesInfo_numeric <- cbind(salesInfo_numeric, storeMatrix, deptMatrix, typeMatrix)
 salesInfo_matrix <- data.matrix(salesInfo_numeric)
 
-# Train & Test sets (random sampling from all data)
-# rn_train <- sample(nrow(df), floor(nrow(df)*0.8))
-# train_data <- salesInfo_matrix[rn_train,]
-# train_values <- salesValues[rn_train]
-# test_data <- salesInfo_matrix[-rn_train,]
-# test_values <- salesValues[-rn_train]
-
-# Train & Test sets (train on first 24 months, reserve last 8 months for testing)
+# Train & Test sets (train on first 24 months, reserve last 9 months for testing)
 range(df$Date)
 rn_train <- as.numeric(rownames(df[df$Date < as.Date("2012-02-04"),]))
 train_data <- salesInfo_matrix[rn_train,]
@@ -308,10 +309,8 @@ xgb_model <- xgboost(data = dtrain,
                   
 # Test xgb_model
 pred_values <- predict(xgb_model, dtest)
-mse <- mean((test_values - pred_values)^2)
-mae = caret::MAE(test_values, pred_values)
 rmse = caret::RMSE(test_values, pred_values)
-cat("MSE: ", mse, "MAE: ", mae, " RMSE: ", rmse)
+paste("RMSE: ", rmse)
 # RMSE: 4215.517 similar to round 211
 
 # tune nrounds = 211
@@ -323,10 +322,8 @@ xgb_model_2 <- xgboost(data = dtrain,
 
 # Test xgb_model_2
 pred_values <- predict(xgb_model_2, dtest)
-mse <- mean((test_values - pred_values)^2)
-mae = caret::MAE(test_values, pred_values)
 rmse = caret::RMSE(test_values, pred_values)
-cat("MSE: ", mse, "MAE: ", mae, " RMSE: ", rmse)
+paste("RMSE: ", rmse)
 # RMSE: 4617.917 (worse than xgb_model)
 
 # tune nrounds = 1000
@@ -338,10 +335,8 @@ xgb_model_3 <- xgboost(data = dtrain,
 
 # Test xgb_model_3
 pred_values <- predict(xgb_model_3, dtest)
-mse <- mean((test_values - pred_values)^2)
-mae = caret::MAE(test_values, pred_values)
 rmse = caret::RMSE(test_values, pred_values)
-cat("MSE: ", mse, "MAE: ", mae, " RMSE: ", rmse)
+paste("RMSE: ", rmse)
 # RMSE: 4086.292 (best of 3 models)
 
 # Root Mean Squared Error & Percentage of cases with less than 30% error
@@ -349,17 +344,18 @@ errors <- pred_values - test_values
 rel_change <- 1 - ((test_values - abs(errors)) / test_values)
 pred30 <- table(rel_change<0.30)["TRUE"] / length(test_values)
 paste("PRED(30):", pred30)
+# PRED(30): 0.659047517560451
 
 # Output results as CSV
 output_df_results <- df %>%
     filter(Date > as.Date("2012-02-04")) %>%
-    select(1:4) %>%
+    dplyr::select(1:4) %>%
     bind_cols(Predicted_Sales = pred_values)
 write.csv(output_df_results, "XGBoost_output.csv", row.names = F)
 
 # Output results + Training Data as CSV
 output_df_all <- df %>%
-    select(1:4) %>%
+    dplyr::select(1:4) %>%
     left_join(output_df_results)
 write.csv(output_df_all, "XGBoost_output_all.csv", row.names = F)
 
@@ -377,6 +373,8 @@ xgb.plot.importance(importance_matrix)
 
 Prophet
 ```{r}
+# Too many records for Prophet to run on current machine
+# Aggregate data at the Dept level to get Storewide Sales
 df_agg_stores <- df[c(1, 3, 4)]
 setDT(df_agg_stores)
 df_agg_stores <- df_agg_stores[, sum(Weekly_Sales), by = list(Store, Date)]
@@ -402,7 +400,7 @@ future$Store <- df_agg_stores$Store
 
 forecast <- predict(m, future)
 output <- cbind(forecast[c('ds', 'yhat')], df_agg_stores) %>%
-  select(c(4, 3, 5, 2)) %>%
+  dplyr::select(c(4, 3, 5, 2)) %>%
   dplyr::rename(Predicted_Sales = yhat, Actual_Sales = Storewide_Sales)
 
 
@@ -410,10 +408,8 @@ output <- cbind(forecast[c('ds', 'yhat')], df_agg_stores) %>%
 predictions <- output[output$Date > as.Date("2012-02-04"),]
 pred_values <- predictions$Predicted_Sales
 actual_values <- predictions$Actual_Sales
-mse <- mean((actual_values - pred_values)^2)
-mae = caret::MAE(actual_values, pred_values)
 rmse = caret::RMSE(actual_values, pred_values)
-cat("MSE: ", mse, "MAE: ", mae, " RMSE: ", rmse)
+cat(" RMSE: ", rmse)
 # RMSE: 507580
 
 # Root Mean Squared Error & Percentage of cases with less than 30% error
@@ -425,6 +421,5 @@ paste("PRED(30):", pred30)
 
 # Output results + Training Data as CSV
 write.csv(predictions, "Prophet_output.csv", row.names = FALSE)
-
 ```
 
