@@ -9,6 +9,6 @@ XGBoost was found to be the most effective in predicting sales volumes using thi
 
 Root directory contains the final report and presentation.
 
-Code directory contains Tableau workbook visualizing predictive model performance, as well as the underlying R code.
+[Code directory](Code/) contains Tableau workbook visualizing predictive model performance, as well as the underlying R code.
 
-Data directory contains the raw CSV data.
+[Data directory](Data/) contains the raw CSV data.
