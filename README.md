@@ -7,7 +7,7 @@ Once the data was cleaned and explored, predictive models were developed using t
 
 XGBoost was found to be the most effective in predicting sales volumes using this dataset.
 
-Main directory contains the final report and presentation.
+Root directory contains the final report and presentation.
 
 Code directory contains Tableau workbook visualizing predictive model performance, as well as the underlying R code.
 
