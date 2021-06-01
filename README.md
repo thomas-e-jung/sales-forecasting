@@ -1,5 +1,5 @@
 # Sales-Forecasting
-Final capstone project for Ryerson Chang School Big Data Certificate
+Final capstone project for Ryerson Chang School Big Data Certificate: predicting sales volumes
 
 This project looked at historical Walmart sales data with features such as temperature, fuel prices, unemployment rates, and holidays. The goal was to predict sales volumes for each of the 45 stores as well as 81 departments in each store.
 
