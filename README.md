@@ -1,4 +1,4 @@
-# Sales-Forecasting
+# Sales Forecasting
 Final capstone project for Ryerson Chang School Big Data Certificate: predicting sales volumes
 
 This project looked at historical Walmart sales data with features such as temperature, fuel prices, unemployment rates, and holidays. The goal was to predict sales volumes for each of the 45 stores as well as 81 departments in each store.
@@ -9,6 +9,6 @@ XGBoost was found to be the most effective in predicting sales volumes using thi
 
 Root directory contains the final report and presentation.
 
-[Code directory](Code/) contains Tableau workbook visualizing predictive model performance, as well as the underlying R code.
+[Code directory](code/) contains Tableau workbook visualizing predictive model performance, as well as the underlying R code.
 
-[Data directory](Data/) contains the raw CSV data.
+[Data directory](data/) contains the raw CSV data.
